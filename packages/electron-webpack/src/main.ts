@@ -9,7 +9,7 @@ import "source-map-support/register"
 import { Configuration, Plugin, Rule } from "webpack"
 import { configureTypescript } from "./configurators/ts"
 import { configureVue } from "./configurators/vue/vue"
-import { ConfigurationEnv, ConfigurationType, ElectronWebpackConfiguration, PackageMetadata } from "./core"
+import { ConfigurationEnv, ConfigurationType, ElectronWebpackConfiguration, PackageMetadata, PartConfiguration } from "./core"
 import { BaseTarget } from "./targets/BaseTarget"
 import { MainTarget } from "./targets/MainTarget"
 import { BaseRendererTarget, RendererTarget } from "./targets/RendererTarget"
@@ -20,7 +20,7 @@ export { ElectronWebpackConfiguration } from "./core"
 const _debug = require("debug")
 
 export function getAppConfiguration(env: ConfigurationEnv) {
-  return BluebirdPromise.all([configure("main", env), configure("renderer", env)])
+  return BluebirdPromise.filter([configure("main", env), configure("renderer", env)], it => it != null)
 }
 
 export function getMainConfiguration(env: ConfigurationEnv) {
@@ -70,10 +70,10 @@ export class WebpackConfigurator {
   readonly entryFiles: Array<string> = []
 
   constructor(readonly type: ConfigurationType, readonly env: ConfigurationEnv, readonly electronWebpackConfiguration: ElectronWebpackConfiguration, readonly metadata: PackageMetadata) {
-    if (electronWebpackConfiguration.renderer == null) {
+    if (electronWebpackConfiguration.renderer === undefined) {
       electronWebpackConfiguration.renderer = {}
     }
-    if (electronWebpackConfiguration.main == null) {
+    if (electronWebpackConfiguration.main === undefined) {
       electronWebpackConfiguration.main = {}
     }
 
@@ -91,26 +91,38 @@ export class WebpackConfigurator {
     this.isProduction = this.env.production !== false && this.env.production !== "false" && (this.env.production === true || this.env.production === "true" || process.env.NODE_ENV === "production")
     this.debug(`isProduction: ${this.isProduction}`)
 
-    this.sourceDir = this.getSourceDirectory(this.type)
+    this.sourceDir = this.getSourceDirectory(this.type)!!
 
     const commonSourceDirectory = this.electronWebpackConfiguration.commonSourceDirectory
     this.commonSourceDirectory = commonSourceDirectory == null ? path.join(this.projectDir, "src", "common") : path.resolve(this.projectDir, commonSourceDirectory)
   }
 
-  getSourceDirectory(type: ConfigurationType) {
-    const isRenderer = type.startsWith("renderer") || type === "test"
-    let result: string | null | undefined
-    if (isRenderer) {
-      result = this.electronWebpackConfiguration.renderer!!.sourceDirectory
-    }
-    else if (type === "main") {
-      result = this.electronWebpackConfiguration.main!!.sourceDirectory
+  /**
+   * Returns null if code processing for type is disabled.
+   */
+  getSourceDirectory(type: ConfigurationType): string | null {
+    const part = this.getPartConfiguration(type)
+    if (part === null || (part != null && part.sourceDirectory === null)) {
+      // part or sourceDirectory is explicitly set to null
+      return null
     }
 
-    if (result != null) {
+    const result = part == null ? null : part.sourceDirectory
+    if (result == null) {
+      return path.join(this.projectDir, "src", type.startsWith("renderer") || type === "test" ? "renderer" : type)
+    }
+    else {
       return path.resolve(this.projectDir, result)
     }
-    return path.join(this.projectDir, "src", isRenderer ? "renderer" : type)
+  }
+
+  getPartConfiguration(type: ConfigurationType): PartConfiguration | null | undefined {
+    if (type === "main") {
+      return this.electronWebpackConfiguration.main
+    }
+    else {
+      return this.electronWebpackConfiguration.renderer
+    }
   }
 
   get commonDistDirectory() {
@@ -280,8 +292,16 @@ How to fix:
   return new WebpackConfigurator(type, env, electronWebpackConfig, packageMetadata)
 }
 
-export async function configure(type: ConfigurationType, env: ConfigurationEnv | null) {
-  return (await createConfigurator(type, env)).configure()
+export async function configure(type: ConfigurationType, env: ConfigurationEnv | null): Promise<Configuration | null> {
+  const configurator = await createConfigurator(type, env)
+  const sourceDir = configurator.sourceDir
+  // explicitly set to null - do not handle at all and do not show info message
+  if (sourceDir === null) {
+    return null
+  }
+  else {
+    return configurator.configure()
+  }
 }
 
 async function computeEntryFile(srcDir: string, projectDir: string): Promise<string | null> {

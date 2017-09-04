@@ -3,7 +3,8 @@
 import * as path from "path"
 import yargs from "yargs"
 
-// tslint:disable:no-unused-expression
+// not strict because we allow to pass any webpack args
+// tslint:disable-next-line:no-unused-expression
 yargs
   .command(["app", "*"], "Compile application", yargs => yargs, argv => build("app"))
   .command(["main"], "Compile main process", yargs => yargs, argv => build("main"))
@@ -11,7 +12,6 @@ yargs
   .command(["dll"], "Compile DLL bundles", yargs => yargs, argv => build("renderer.dll"))
   .command(["dev"], "Run a development mode", yargs => yargs, argv => runInDevMode())
   .help()
-  .strict()
   .argv
 
 function build(configFile: string) {
